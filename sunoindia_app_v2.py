@@ -1,56 +1,67 @@
 import os
-# Install FFmpeg for audio processing
-os.system("apt-get update && apt-get install -y ffmpeg")
-
+import sys
 import torch
 import numpy as np
 import streamlit as st
-import librosa
-import soundfile as sf
+from pydub import AudioSegment
 from demucs.pretrained import get_model
 from demucs.apply import apply_model
+
+# -------------------
+# Auto-install FFmpeg if missing
+# -------------------
+def install_ffmpeg():
+    try:
+        AudioSegment.converter
+    except Exception:
+        st.info("Installing FFmpeg for audio processing...")
+        if sys.platform.startswith("linux"):
+            os.system("apt-get update && apt-get install -y ffmpeg")
+        elif sys.platform == "darwin":
+            os.system("brew install ffmpeg")
+        elif sys.platform == "win32":
+            st.warning("Please install FFmpeg manually on Windows: https://ffmpeg.org/download.html")
+        else:
+            st.warning("FFmpeg installation not supported on this OS automatically.")
+
+install_ffmpeg()
 
 # 🎨 Streamlit Page Config
 st.set_page_config(page_title="SunoIndia - Vocal & Instrumental Splitter", page_icon="🎵", layout="centered")
 
-# -----------------------
-# Authentication System
-# -----------------------
+# -------------------
+# Authentication State
+# -------------------
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "users" not in st.session_state:
     st.session_state.users = {"admin": "admin"}  # default user
 
+# -------------------
+# Login Page
+# -------------------
 def login_page():
     st.title("🎶 SunoIndia")
     st.subheader("Music Separation App")
     st.markdown("#### 🌈 Welcome! Please Login, Signup or Continue without Login")
-
-    if "login_user" not in st.session_state:
-        st.session_state.login_user = ""
-    if "login_pass" not in st.session_state:
-        st.session_state.login_pass = ""
-    if "signup_user" not in st.session_state:
-        st.session_state.signup_user = ""
-    if "signup_pass" not in st.session_state:
-        st.session_state.signup_pass = ""
 
     tab1, tab2, tab3 = st.tabs(["🔑 Login", "📝 Signup", "🚀 Continue without Login"])
 
     with tab1:
         username = st.text_input("Username", key="login_user")
         password = st.text_input("Password", type="password", key="login_pass")
-        if st.button("Login", key="login_btn"):
+        if st.button("Login"):
             if username in st.session_state.users and st.session_state.users[username] == password:
                 st.session_state.logged_in = True
-                st.experimental_rerun()
+                st.success("✅ Logged in successfully!")
+                st.rerun()
             else:
                 st.error("❌ Invalid credentials")
 
     with tab2:
         new_user = st.text_input("Choose Username", key="signup_user")
         new_pass = st.text_input("Choose Password", type="password", key="signup_pass")
-        if st.button("Signup", key="signup_btn"):
+        if st.button("Signup"):
             if new_user in st.session_state.users:
                 st.error("⚠️ Username already exists")
             elif new_user and new_pass:
@@ -60,79 +71,105 @@ def login_page():
                 st.warning("Please fill all fields")
 
     with tab3:
-        if st.button("Continue without Login", key="continue_btn"):
+        if st.button("Continue without Login"):
             st.session_state.logged_in = True
-            st.experimental_rerun()
+            st.rerun()
 
+# -------------------
+# App Page
+# -------------------
 def app_page():
     st.title("🎶 SunoIndia")
     st.subheader("Separate Vocals & Instrumentals from any song instantly!")
 
     if st.button("🚪 Logout"):
         st.session_state.logged_in = False
-        st.experimental_rerun()
+        st.rerun()
 
     uploaded_file = st.file_uploader("Upload your MP3 file", type=["mp3"])
 
     if uploaded_file is not None:
-        if "processed" not in st.session_state or not st.session_state.processed:
-            st.session_state.processed = False
-            input_song = "input_song.mp3"
-            with open(input_song, "wb") as f:
-                f.write(uploaded_file.read())
+        input_song = "input_song.mp3"
+        with open(input_song, "wb") as f:
+            f.write(uploaded_file.read())
 
-            st.info("🎵 Loading audio...")
-            y, sr = librosa.load(input_song, sr=None, mono=False)
+        st.info("🎵 Converting MP3 to WAV...")
+        temp_wav = "temp_song.wav"
+        audio = AudioSegment.from_file(input_song, format="mp3")
+        audio.export(temp_wav, format="wav")
 
-            st.info("🎵 Loading Demucs model...")
-            model = get_model("htdemucs")
+        st.info("🎵 Loading Demucs model...")
+        model = get_model("htdemucs")
 
-            st.info("🎵 Separating vocals and instrumental...")
-            progress = st.progress(0, text="Processing... Please wait")
+        st.info("🎵 Loading WAV file...")
+        song = AudioSegment.from_wav(temp_wav)
 
-            wav = torch.tensor(y, dtype=torch.float32).view(y.shape[0], -1) if y.ndim > 1 else torch.tensor(y, dtype=torch.float32).unsqueeze(0)
-            out = apply_model(model, wav.unsqueeze(0), device="cpu", split=True)
-            sources = model.sources
+        samples = np.array(song.get_array_of_samples())
+        wav = torch.tensor(samples, dtype=torch.float32).view(-1, song.channels).t() / 32768.0
+        sr = song.frame_rate
 
-            vocals = None
-            instrumental = None
+        st.info("🎵 Separating vocals and instrumental...")
+        progress = st.progress(0, text="Processing... Please wait")
 
-            steps = len(sources)
-            for i, (source, audio_tensor) in enumerate(zip(sources, out[0])):
-                audio_np = audio_tensor.cpu().numpy()
-                if source == "vocals":
-                    vocals = audio_np
+        out = apply_model(model, wav.unsqueeze(0), device="cpu", split=True)
+        sources = model.sources
+
+        vocals = None
+        instrumental = None
+
+        steps = len(sources)
+        for i, (source, audio_tensor) in enumerate(zip(sources, out[0])):
+            audio_np = audio_tensor.cpu().numpy()
+            audio_int16 = np.clip(audio_np * 32767, -32768, 32767).astype(np.int16)
+
+            if source == "vocals":
+                vocals = audio_int16
+            else:
+                if instrumental is None:
+                    instrumental = audio_int16.astype(np.int32)
                 else:
-                    instrumental = audio_np if instrumental is None else instrumental + audio_np
+                    instrumental += audio_int16.astype(np.int32)
 
-                percent_complete = int(((i + 1) / steps) * 100)
-                progress.progress(percent_complete, text=f"Processing... {percent_complete}%")
+            percent_complete = int(((i + 1) / steps) * 100)
+            progress.progress(percent_complete, text=f"Processing... {percent_complete}%")
 
-            output_folder = "output"
-            os.makedirs(output_folder, exist_ok=True)
+        instrumental = np.clip(instrumental, -32768, 32767).astype(np.int16)
 
-            vocals_file = os.path.join(output_folder, "vocals.wav")
-            instr_file = os.path.join(output_folder, "instrumental.wav")
+        def np_to_audseg(np_audio, sr):
+            if np_audio.ndim == 1:
+                channels = 1
+            else:
+                channels = np_audio.shape[0]
+                np_audio = np_audio.T.flatten()
+            return AudioSegment(
+                np_audio.tobytes(),
+                frame_rate=sr,
+                sample_width=2,
+                channels=channels
+            )
 
-            sf.write(vocals_file, vocals.T, sr)
-            sf.write(instr_file, instrumental.T, sr)
+        output_folder = "output"
+        os.makedirs(output_folder, exist_ok=True)
 
-            st.session_state.vocals_file = vocals_file
-            st.session_state.instr_file = instr_file
-            st.session_state.processed = True
+        vocals_seg = np_to_audseg(vocals, sr)
+        vocals_file = os.path.join(output_folder, "vocals.mp3")
+        vocals_seg.export(vocals_file, format="mp3", bitrate="192k")
 
-        # Provide download buttons without re-processing
-        if st.session_state.processed:
-            st.success("✅ Done! Files are ready.")
-            with open(st.session_state.vocals_file, "rb") as f:
-                st.download_button("⬇️ Download Vocals", f, file_name="vocals.wav", mime="audio/wav")
+        instr_seg = np_to_audseg(instrumental, sr)
+        instr_file = os.path.join(output_folder, "instrumental.mp3")
+        instr_seg.export(instr_file, format="mp3", bitrate="192k")
 
-            with open(st.session_state.instr_file, "rb") as f:
-                st.download_button("⬇️ Download Instrumental", f, file_name="instrumental.wav", mime="audio/wav")
+        st.success("✅ Done! Files are ready.")
 
-# -----------------------
+        with open(vocals_file, "rb") as f:
+            st.download_button("⬇️ Download Vocals", f, file_name="vocals.mp3", mime="audio/mp3")
+
+        with open(instr_file, "rb") as f:
+            st.download_button("⬇️ Download Instrumental", f, file_name="instrumental.mp3", mime="audio/mp3")
+
+# -------------------
 # Main
-# -----------------------
+# -------------------
 if st.session_state.logged_in:
     app_page()
 else:
