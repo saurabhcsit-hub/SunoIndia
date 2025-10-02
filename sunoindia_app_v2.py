@@ -1,4 +1,7 @@
 import os
+# Install FFmpeg for pydub audio processing
+os.system("apt-get update && apt-get install -y ffmpeg")
+
 import torch
 import numpy as np
 import streamlit as st
@@ -7,104 +10,59 @@ from demucs.pretrained import get_model
 from demucs.apply import apply_model
 
 # 🎨 Streamlit Page Config
-st.set_page_config(page_title="SunoIndia - Vocal & Instrumental Splitter", 
-                   page_icon="🎵", 
-                   layout="centered")
+st.set_page_config(page_title="SunoIndia - Vocal & Instrumental Splitter", page_icon="🎵", layout="centered")
 
-# -------------------
-# Session state init
-# -------------------
-if "users" not in st.session_state:
-    # Default one user
-    st.session_state["users"] = {"admin": "123"}
-
+# -----------------------
+# Authentication System
+# -----------------------
 if "logged_in" not in st.session_state:
-    st.session_state["logged_in"] = False
-if "guest" not in st.session_state:
-    st.session_state["guest"] = False
-if "current_user" not in st.session_state:
-    st.session_state["current_user"] = None
+    st.session_state.logged_in = False
+if "users" not in st.session_state:
+    st.session_state.users = {"admin": "admin"}  # default user
 
-# -------------------
-# Landing Page
-# -------------------
-def landing_page():
-    st.markdown(
-        """
-        <div style="text-align:center; padding:30px;">
-            <h1 style="font-size:50px; color:#ff4081; font-weight:bold;">🎶 SunoIndia 🎶</h1>
-            <h3 style="color:#00bcd4;">Separate Vocals & Instrumentals from any song instantly!</h3>
-            <p style="color:gray;">Your AI-powered music companion</p>
-            <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:20px; margin-top:40px;">
-                <div style="background:#ff8a80; padding:30px; border-radius:20px; color:white;">🎤 Vocals</div>
-                <div style="background:#82b1ff; padding:30px; border-radius:20px; color:white;">🎸 Instrumentals</div>
-                <div style="background:#a7ffeb; padding:30px; border-radius:20px; color:black;">🥁 Drums</div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.info("👉 Please login, signup, or continue without login")
-
-    tab1, tab2, tab3 = st.tabs(["🔑 Login", "📝 Signup", "🚀 Guest"])
-
-    # Login form
-    with tab1:
-        with st.form("login_form"):
-            username = st.text_input("Username")
-            password = st.text_input("Password", type="password")
-            login_btn = st.form_submit_button("Login")
-
-            if login_btn:
-                if username in st.session_state["users"] and st.session_state["users"][username] == password:
-                    st.session_state["logged_in"] = True
-                    st.session_state["current_user"] = username
-                    st.success(f"✅ Welcome back {username}!")
-                    st.rerun()
-                else:
-                    st.error("❌ Invalid username or password")
-
-    # Signup form
-    with tab2:
-        with st.form("signup_form"):
-            new_user = st.text_input("Choose Username")
-            new_pass = st.text_input("Choose Password", type="password")
-            signup_btn = st.form_submit_button("Signup")
-
-            if signup_btn:
-                if new_user in st.session_state["users"]:
-                    st.warning("⚠️ Username already exists. Please choose another.")
-                elif new_user.strip() == "" or new_pass.strip() == "":
-                    st.error("❌ Username and password cannot be empty")
-                else:
-                    st.session_state["users"][new_user] = new_pass
-                    st.success("🎉 Signup successful! You can now log in.")
-
-    # Guest access
-    with tab3:
-        if st.button("Continue as Guest"):
-            st.session_state["guest"] = True
-            st.session_state["current_user"] = "Guest"
-            st.rerun()
-
-# -------------------
-# Music Splitter Page
-# -------------------
-def music_splitter():
+def login_page():
     st.title("🎶 SunoIndia")
+    st.subheader("Music Separation App")
 
-    if st.session_state["guest"]:
-        st.subheader("Welcome Guest 👋 (Limited access)")
-    else:
-        st.subheader(f"Welcome {st.session_state['current_user']} 👋")
+    st.markdown("#### 🌈 Welcome! Please Login, Signup or Continue without Login")
 
-    # Logout button
-    if st.button("Logout"):
-        st.session_state["logged_in"] = False
-        st.session_state["guest"] = False
-        st.session_state["current_user"] = None
-        st.rerun()
+    tab1, tab2, tab3 = st.tabs(["🔑 Login", "📝 Signup", "🚀 Continue without Login"])
+
+    with tab1:
+        username = st.text_input("Username", key="login_user")
+        password = st.text_input("Password", type="password", key="login_pass")
+        if st.button("Login"):
+            if username in st.session_state.users and st.session_state.users[username] == password:
+                st.session_state.logged_in = True
+                st.success("✅ Logged in successfully!")
+                st.experimental_rerun()
+            else:
+                st.error("❌ Invalid credentials")
+
+    with tab2:
+        new_user = st.text_input("Choose Username", key="signup_user")
+        new_pass = st.text_input("Choose Password", type="password", key="signup_pass")
+        if st.button("Signup"):
+            if new_user in st.session_state.users:
+                st.error("⚠️ Username already exists")
+            elif new_user and new_pass:
+                st.session_state.users[new_user] = new_pass
+                st.success("✅ Account created! Please login now.")
+            else:
+                st.warning("Please fill all fields")
+
+    with tab3:
+        if st.button("Continue without Login"):
+            st.session_state.logged_in = True
+            st.experimental_rerun()
+
+def app_page():
+    st.title("🎶 SunoIndia")
+    st.subheader("Separate Vocals & Instrumentals from any song instantly!")
+
+    if st.button("🚪 Logout"):
+        st.session_state.logged_in = False
+        st.experimental_rerun()
 
     uploaded_file = st.file_uploader("Upload your MP3 file", type=["mp3"])
 
@@ -134,9 +92,10 @@ def music_splitter():
         out = apply_model(model, wav.unsqueeze(0), device="cpu", split=True)
         sources = model.sources
 
-        vocals, instrumental = None, None
-        steps = len(sources)
+        vocals = None
+        instrumental = None
 
+        steps = len(sources)
         for i, (source, audio_tensor) in enumerate(zip(sources, out[0])):
             audio_np = audio_tensor.cpu().numpy()
             audio_int16 = np.clip(audio_np * 32767, -32768, 32767).astype(np.int16)
@@ -147,7 +106,7 @@ def music_splitter():
                 if instrumental is None:
                     instrumental = audio_int16.astype(np.int32)
                 else:
-                    instrumental += audio_int16.astype(np.int32)
+                    instrumental = instrumental + audio_int16.astype(np.int32)
 
             percent_complete = int(((i + 1) / steps) * 100)
             progress.progress(percent_complete, text=f"Processing... {percent_complete}%")
@@ -186,11 +145,10 @@ def music_splitter():
         with open(instr_file, "rb") as f:
             st.download_button("⬇️ Download Instrumental", f, file_name="instrumental.mp3", mime="audio/mp3")
 
-
-# -------------------
-# Routing
-# -------------------
-if st.session_state["logged_in"] or st.session_state["guest"]:
-    music_splitter()
+# -----------------------
+# Main
+# -----------------------
+if st.session_state.logged_in:
+    app_page()
 else:
-    landing_page()
+    login_page()
