@@ -1,5 +1,7 @@
+
 streamlit
 torch
 numpy
-pydub
+librosa
+soundfile
 demucs
