@@ -26,7 +26,6 @@ def login_page():
     st.subheader("Music Separation App")
     st.markdown("#### 🌈 Welcome! Please Login, Signup or Continue without Login")
 
-    # Initialize session state keys
     if "login_user" not in st.session_state:
         st.session_state.login_user = ""
     if "login_pass" not in st.session_state:
@@ -76,53 +75,60 @@ def app_page():
     uploaded_file = st.file_uploader("Upload your MP3 file", type=["mp3"])
 
     if uploaded_file is not None:
-        input_song = "input_song.mp3"
-        with open(input_song, "wb") as f:
-            f.write(uploaded_file.read())
+        if "processed" not in st.session_state or not st.session_state.processed:
+            st.session_state.processed = False
+            input_song = "input_song.mp3"
+            with open(input_song, "wb") as f:
+                f.write(uploaded_file.read())
 
-        st.info("🎵 Loading audio...")
-        y, sr = librosa.load(input_song, sr=None, mono=False)
+            st.info("🎵 Loading audio...")
+            y, sr = librosa.load(input_song, sr=None, mono=False)
 
-        st.info("🎵 Loading Demucs model...")
-        model = get_model("htdemucs")
+            st.info("🎵 Loading Demucs model...")
+            model = get_model("htdemucs")
 
-        st.info("🎵 Separating vocals and instrumental...")
-        progress = st.progress(0, text="Processing... Please wait")
+            st.info("🎵 Separating vocals and instrumental...")
+            progress = st.progress(0, text="Processing... Please wait")
 
-        wav = torch.tensor(y, dtype=torch.float32).view(y.shape[0], -1) if y.ndim > 1 else torch.tensor(y, dtype=torch.float32).unsqueeze(0)
-        out = apply_model(model, wav.unsqueeze(0), device="cpu", split=True)
-        sources = model.sources
+            wav = torch.tensor(y, dtype=torch.float32).view(y.shape[0], -1) if y.ndim > 1 else torch.tensor(y, dtype=torch.float32).unsqueeze(0)
+            out = apply_model(model, wav.unsqueeze(0), device="cpu", split=True)
+            sources = model.sources
 
-        vocals = None
-        instrumental = None
+            vocals = None
+            instrumental = None
 
-        steps = len(sources)
-        for i, (source, audio_tensor) in enumerate(zip(sources, out[0])):
-            audio_np = audio_tensor.cpu().numpy()
-            if source == "vocals":
-                vocals = audio_np
-            else:
-                instrumental = audio_np if instrumental is None else instrumental + audio_np
+            steps = len(sources)
+            for i, (source, audio_tensor) in enumerate(zip(sources, out[0])):
+                audio_np = audio_tensor.cpu().numpy()
+                if source == "vocals":
+                    vocals = audio_np
+                else:
+                    instrumental = audio_np if instrumental is None else instrumental + audio_np
 
-            percent_complete = int(((i + 1) / steps) * 100)
-            progress.progress(percent_complete, text=f"Processing... {percent_complete}%")
+                percent_complete = int(((i + 1) / steps) * 100)
+                progress.progress(percent_complete, text=f"Processing... {percent_complete}%")
 
-        output_folder = "output"
-        os.makedirs(output_folder, exist_ok=True)
+            output_folder = "output"
+            os.makedirs(output_folder, exist_ok=True)
 
-        vocals_file = os.path.join(output_folder, "vocals.wav")
-        instr_file = os.path.join(output_folder, "instrumental.wav")
+            vocals_file = os.path.join(output_folder, "vocals.wav")
+            instr_file = os.path.join(output_folder, "instrumental.wav")
 
-        sf.write(vocals_file, vocals.T, sr)
-        sf.write(instr_file, instrumental.T, sr)
+            sf.write(vocals_file, vocals.T, sr)
+            sf.write(instr_file, instrumental.T, sr)
 
-        st.success("✅ Done! Files are ready.")
+            st.session_state.vocals_file = vocals_file
+            st.session_state.instr_file = instr_file
+            st.session_state.processed = True
 
-        with open(vocals_file, "rb") as f:
-            st.download_button("⬇️ Download Vocals", f, file_name="vocals.wav", mime="audio/wav")
+        # Provide download buttons without re-processing
+        if st.session_state.processed:
+            st.success("✅ Done! Files are ready.")
+            with open(st.session_state.vocals_file, "rb") as f:
+                st.download_button("⬇️ Download Vocals", f, file_name="vocals.wav", mime="audio/wav")
 
-        with open(instr_file, "rb") as f:
-            st.download_button("⬇️ Download Instrumental", f, file_name="instrumental.wav", mime="audio/wav")
+            with open(st.session_state.instr_file, "rb") as f:
+                st.download_button("⬇️ Download Instrumental", f, file_name="instrumental.wav", mime="audio/wav")
 
 # -----------------------
 # Main
